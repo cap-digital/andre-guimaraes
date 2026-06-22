@@ -19,10 +19,12 @@ import {
   groupBy,
 } from "@/lib/aggregations";
 import {
+  addAggregates,
   cpc,
   cpl,
   cpm,
   ctr,
+  EMPTY_AGG,
   frequency,
   sumRows,
   taxaConversao,
@@ -56,7 +58,7 @@ type RankMetric = "spend" | "leads" | "cpl";
 export default function VisaoGeralPage() {
   const {
     filteredRows,
-    rows,
+    summaryRows,
     empByCid,
     creatives,
     emp,
@@ -70,9 +72,10 @@ export default function VisaoGeralPage() {
 
   const total = useMemo(() => sumRows(filteredRows), [filteredRows]);
 
-  // Período anterior de mesmo tamanho (para variação)
+  // Período anterior de mesmo tamanho (para variação). Usa o resumo diário,
+  // que cobre todo o período — o detalhe carregado é só do período visível.
   const prev = useMemo(() => {
-    if (!de || !ate) return null;
+    if (!de || !ate || !summaryRows.length) return null;
     const start = new Date(de);
     const end = new Date(ate);
     const len = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
@@ -82,13 +85,16 @@ export default function VisaoGeralPage() {
     prevStart.setDate(prevStart.getDate() - (len - 1));
     const ps = prevStart.toISOString().slice(0, 10);
     const pe = prevEnd.toISOString().slice(0, 10);
-    const r = rows.filter((row) => {
-      if (row.d < ps || row.d > pe) return false;
-      if (emp !== "todos" && empByCid[row.c] !== emp) return false;
-      return true;
-    });
-    return sumRows(r);
-  }, [rows, empByCid, de, ate, emp]);
+    const acc = { ...EMPTY_AGG };
+    let temDados = false;
+    for (const s of summaryRows) {
+      if (s.d < ps || s.d > pe) continue;
+      if (emp !== "todos" && s.emp !== emp) continue;
+      addAggregates(acc, s);
+      temDados = true;
+    }
+    return temDados ? acc : null;
+  }, [summaryRows, de, ate, emp]);
 
   const delta = (cur: number, old: number | undefined) => {
     if (old === undefined || old === 0) return null;

@@ -10,8 +10,10 @@ import { fmtBRLCompact, fmtCompact } from "@/lib/format";
 import { ErrorState } from "@/components/ui/States";
 
 export function Landing() {
-  const { rows, empByCid, range, loading, error, reload } = useData();
+  const { rows, empByCid, de, ate, loading, error, reload } = useData();
 
+  // Usa o detalhe carregado (últimos 30 dias) para a landing carregar rápido.
+  // O rodapé reflete exatamente essa janela.
   const statsByEmp = useMemo(() => {
     const m = new Map<string, { spend: number; leads: number }>();
     for (const e of EMPREENDIMENTOS) m.set(e.key, { spend: 0, leads: 0 });
@@ -148,10 +150,10 @@ export function Landing() {
               })}
             </div>
 
-            {!loading && range.min && (
+            {!loading && de && (
               <p className="mt-6 text-center text-[11px] text-white/40">
-                Dados de {range.min.split("-").reverse().join("/")} a{" "}
-                {range.max.split("-").reverse().join("/")}
+                Dados dos últimos 30 dias · {de.split("-").reverse().join("/")} a{" "}
+                {ate.split("-").reverse().join("/")}
               </p>
             )}
           </>

@@ -34,6 +34,23 @@ export function sumRows(rows: MetricRow[]): Aggregates {
   return a;
 }
 
+// Soma um agregado em outro (usado com SummaryRow, que estende Aggregates)
+export function addAggregates(a: Aggregates, b: Aggregates): Aggregates {
+  a.spend += b.spend;
+  a.impressions += b.impressions;
+  a.clicks += b.clicks;
+  a.reach += b.reach;
+  a.engagement += b.engagement;
+  a.videoViews += b.videoViews;
+  a.v25 += b.v25;
+  a.v50 += b.v50;
+  a.v75 += b.v75;
+  a.v100 += b.v100;
+  a.conversations += b.conversations;
+  a.leads += b.leads;
+  return a;
+}
+
 export function addAgg(a: Aggregates, r: MetricRow): Aggregates {
   a.spend += r.sp;
   a.impressions += r.im;

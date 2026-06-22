@@ -22,23 +22,30 @@ export function monthsBetween(min: string, max: string): string[] {
 }
 
 export function useDashboardData() {
-  const { rows, creatives, empByCid, range, loading, error, updatedAt, reload } =
-    useData();
+  const {
+    rows,
+    creatives,
+    summaryRows,
+    empByCid,
+    range,
+    de,
+    ate,
+    loading,
+    error,
+    updatedAt,
+    reload,
+  } = useData();
   const { filters, setFilters } = useFilters();
 
-  // Intervalo efetivo (padrão = intervalo total dos dados)
-  const de = filters.de || range.min;
-  const ate = filters.ate || range.max;
+  // O período (de/ate) já vem aplicado pelo servidor; aqui só filtramos por
+  // empreendimento. O recorte de data é mantido por segurança.
   const emp = filters.emp || "todos";
 
   const filteredRows = useMemo(() => {
     if (!rows.length) return [] as MetricRow[];
-    return rows.filter((r) => {
-      if (r.d < de || r.d > ate) return false;
-      if (emp !== "todos" && empByCid[r.c] !== emp) return false;
-      return true;
-    });
-  }, [rows, empByCid, de, ate, emp]);
+    if (emp === "todos") return rows;
+    return rows.filter((r) => empByCid[r.c] === emp);
+  }, [rows, empByCid, emp]);
 
   const months = useMemo(
     () => monthsBetween(range.min, range.max),
@@ -48,6 +55,7 @@ export function useDashboardData() {
   return {
     rows,
     creatives,
+    summaryRows,
     empByCid,
     filteredRows,
     range,

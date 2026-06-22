@@ -37,10 +37,9 @@ export function DateRangePicker() {
   const isFullRange = de === range.min && ate === range.max;
 
   function apply(newDe: string, newAte: string) {
-    setFilters({
-      de: newDe === range.min ? null : newDe,
-      ate: newAte === range.max ? null : newAte,
-    });
+    // Sempre explícito: sem parâmetros, o padrão passa a ser "últimos 30 dias"
+    // (carregado pelo servidor). "Todo o período" grava o intervalo completo.
+    setFilters({ de: newDe, ate: newAte });
     setDraft(undefined);
     setOpen(false);
   }

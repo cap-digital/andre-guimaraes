@@ -1,6 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { resolveEmp } from "@/lib/empreendimentos";
-import type { Creative, DatasetResponse, MetricRow } from "@/lib/types";
+import { EMPTY_AGG } from "@/lib/metrics";
+import type {
+  Creative,
+  DatasetResponse,
+  MetricRow,
+  SummaryResponse,
+  SummaryRow,
+} from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,15 +43,19 @@ interface RawRow {
   Empreendimento?: string;
 }
 
+interface EdgePayload {
+  meta?: RawRow[];
+  range?: { min: string; max: string };
+}
+
 const num = (v: unknown): number => {
   const n = typeof v === "number" ? v : parseFloat(String(v));
   return Number.isFinite(n) ? n : 0;
 };
 
-let cache: { data: DatasetResponse; ts: number } | null = null;
-let inflight: Promise<DatasetResponse> | null = null;
+const emptyRange = { min: "", max: "" };
 
-async function buildDataset(): Promise<DatasetResponse> {
+async function callEdge(body: Record<string, unknown>): Promise<EdgePayload> {
   const res = await fetch(EDGE_URL, {
     method: "POST",
     headers: {
@@ -52,7 +63,7 @@ async function buildDataset(): Promise<DatasetResponse> {
       apikey: EDGE_KEY,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ name: "Functions" }),
+    body: JSON.stringify(body),
     cache: "no-store",
   });
 
@@ -60,15 +71,22 @@ async function buildDataset(): Promise<DatasetResponse> {
     throw new Error(`Edge function respondeu ${res.status}`);
   }
 
-  const json = (await res.json()) as { meta?: RawRow[] };
+  return (await res.json()) as EdgePayload;
+}
+
+// ---- Detalhe: linhas por criativo × idade × gênero, do período selecionado ----
+
+async function buildDetail(de?: string, ate?: string): Promise<DatasetResponse> {
+  const body: Record<string, unknown> = { mode: "detail" };
+  if (de) body.de = de;
+  if (ate) body.ate = ate;
+
+  const json = await callEdge(body);
   const raw = Array.isArray(json.meta) ? json.meta : [];
 
   const creativeIndex = new Map<string, number>();
   const creatives: Creative[] = [];
   const rows: MetricRow[] = [];
-
-  let minDate = "9999-99-99";
-  let maxDate = "0000-00-00";
 
   for (const r of raw) {
     const emp = resolveEmp(r.Empreendimento, r.campaign);
@@ -88,12 +106,8 @@ async function buildDataset(): Promise<DatasetResponse> {
       });
     }
 
-    const d = String(r.date).slice(0, 10);
-    if (d < minDate) minDate = d;
-    if (d > maxDate) maxDate = d;
-
     rows.push({
-      d,
+      d: String(r.date).slice(0, 10),
       c: cid,
       ag: r.age || "Unknown",
       g: r.gender || "unknown",
@@ -114,34 +128,114 @@ async function buildDataset(): Promise<DatasetResponse> {
     });
   }
 
+  // O período efetivo é o que a Edge realmente aplicou (padrão = últimos 30 dias).
+  let effDe = de ?? "";
+  let effAte = ate ?? "";
+  if (!effDe || !effAte) {
+    let min = "9999-99-99";
+    let max = "0000-00-00";
+    for (const row of rows) {
+      if (row.d < min) min = row.d;
+      if (row.d > max) max = row.d;
+    }
+    if (rows.length) {
+      effDe = effDe || min;
+      effAte = effAte || max;
+    }
+  }
+
   return {
     rows,
     creatives,
-    range: { min: minDate, max: maxDate },
+    range: json.range ?? emptyRange,
+    de: effDe,
+    ate: effAte,
     updatedAt: new Date().toISOString(),
   };
 }
 
-export async function GET() {
+// ---- Resumo: métricas diárias por empreendimento, todo o período ----
+
+async function buildSummary(): Promise<SummaryResponse> {
+  const json = await callEdge({ mode: "summary" });
+  const raw = Array.isArray(json.meta) ? json.meta : [];
+
+  const map = new Map<string, SummaryRow>();
+  for (const r of raw) {
+    const d = String(r.date).slice(0, 10);
+    const emp = resolveEmp(r.Empreendimento, r.campaign);
+    const key = `${d}||${emp}`;
+    let s = map.get(key);
+    if (!s) {
+      s = { ...EMPTY_AGG, d, emp };
+      map.set(key, s);
+    }
+    s.spend += num(r.spend);
+    s.impressions += num(r.impressions);
+    s.clicks += num(r.clicks);
+    s.reach += num(r.reach);
+    s.engagement += num(r.actions_post_engagement);
+    s.videoViews += num(r.video_thruplay_watched_actions_video_view);
+    s.v25 += num(r.video_p25_watched_actions_video_view);
+    s.v50 += num(r.video_p50_watched_actions_video_view);
+    s.v75 += num(r.video_p75_watched_actions_video_view);
+    s.v100 += num(r.video_p100_watched_actions_video_view);
+    s.conversations += num(
+      r.actions_onsite_conversion_messaging_conversation_started_7d
+    );
+    s.leads +=
+      num(r.actions_offsite_conversion_fb_pixel_lead) +
+      num(r.actions_onsite_conversion_lead_grouped);
+  }
+
+  return {
+    summary: [...map.values()],
+    range: json.range ?? emptyRange,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+// ---- Cache em memória por chave (modo + período) ----
+
+const cache = new Map<string, { data: unknown; ts: number }>();
+const inflight = new Map<string, Promise<unknown>>();
+
+function getCached<T>(key: string, build: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const hit = cache.get(key);
+  if (hit && now - hit.ts < TTL_MS) return Promise.resolve(hit.data as T);
+
+  let promise = inflight.get(key) as Promise<T> | undefined;
+  if (!promise) {
+    promise = build()
+      .then((data) => {
+        cache.set(key, { data, ts: Date.now() });
+        return data;
+      })
+      .finally(() => {
+        inflight.delete(key);
+      });
+    inflight.set(key, promise as Promise<unknown>);
+  }
+  return promise;
+}
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = req.nextUrl;
+  const mode = searchParams.get("mode") === "summary" ? "summary" : "detail";
+
   try {
-    const now = Date.now();
-    if (cache && now - cache.ts < TTL_MS) {
-      return NextResponse.json(cache.data);
+    if (mode === "summary") {
+      const data = await getCached("summary", buildSummary);
+      return NextResponse.json(data);
     }
-    if (!inflight) {
-      inflight = buildDataset()
-        .then((data) => {
-          cache = { data, ts: Date.now() };
-          return data;
-        })
-        .finally(() => {
-          inflight = null;
-        });
-    }
-    const data = await inflight;
+
+    const de = searchParams.get("de") || undefined;
+    const ate = searchParams.get("ate") || undefined;
+    const key = `detail|${de ?? ""}|${ate ?? ""}`;
+    const data = await getCached(key, () => buildDetail(de, ate));
     return NextResponse.json(data);
   } catch (err) {
-    if (cache) return NextResponse.json(cache.data);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Erro ao carregar dados" },
       { status: 502 }

@@ -31,6 +31,22 @@ export interface DatasetResponse {
   rows: MetricRow[];
   creatives: Creative[];
   range: { min: string; max: string };
+  de: string;
+  ate: string;
+  updatedAt: string;
+}
+
+// Linha de resumo: métricas agregadas por dia × empreendimento.
+// Cobre todo o período disponível com payload pequeno (sem o cruzamento
+// criativo × idade × gênero). Usada para o comparativo de período anterior.
+export interface SummaryRow extends Aggregates {
+  d: string; // data YYYY-MM-DD
+  emp: string; // chave do empreendimento
+}
+
+export interface SummaryResponse {
+  summary: SummaryRow[];
+  range: { min: string; max: string };
   updatedAt: string;
 }
 

@@ -9,10 +9,10 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <DataProvider>
-      <Suspense fallback={<FullLoader />}>
+    <Suspense fallback={<FullLoader />}>
+      <DataProvider>
         <Shell>{children}</Shell>
-      </Suspense>
-    </DataProvider>
+      </DataProvider>
+    </Suspense>
   );
 }

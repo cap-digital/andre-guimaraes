@@ -7,12 +7,22 @@ import {
   useMemo,
   useState,
 } from "react";
-import type { Creative, DatasetResponse, MetricRow } from "@/lib/types";
+import { useFilters } from "@/lib/useFilters";
+import type {
+  Creative,
+  DatasetResponse,
+  MetricRow,
+  SummaryResponse,
+  SummaryRow,
+} from "@/lib/types";
 
 interface DataState {
   rows: MetricRow[];
   creatives: Creative[];
+  summaryRows: SummaryRow[];
   range: { min: string; max: string };
+  de: string;
+  ate: string;
   updatedAt: string | null;
   empByCid: string[];
   loading: boolean;
@@ -23,23 +33,52 @@ interface DataState {
 const DataContext = createContext<DataState | null>(null);
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [data, setData] = useState<DatasetResponse | null>(null);
+  const { filters } = useFilters();
+  const [detail, setDetail] = useState<DatasetResponse | null>(null);
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
+  // Resumo (todo o período) — carregado uma vez; alimenta o comparativo
+  // de período anterior. Leve, não bloqueia a interface.
+  useEffect(() => {
+    let active = true;
+    fetch("/api/data?mode=summary")
+      .then(async (r) => {
+        if (!r.ok) throw new Error("summary");
+        return (await r.json()) as SummaryResponse;
+      })
+      .then((d) => {
+        if (active) setSummary(d);
+      })
+      .catch(() => {
+        // Falha no resumo não derruba o dashboard; só desativa os deltas.
+        if (active) setSummary(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [tick]);
+
+  // Detalhe — recarrega sempre que o período selecionado muda.
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError(null);
-    fetch("/api/data")
+
+    const params = new URLSearchParams({ mode: "detail" });
+    if (filters.de) params.set("de", filters.de);
+    if (filters.ate) params.set("ate", filters.ate);
+
+    fetch(`/api/data?${params.toString()}`)
       .then(async (r) => {
         if (!r.ok) throw new Error("Não foi possível carregar os dados.");
         return (await r.json()) as DatasetResponse;
       })
       .then((d) => {
         if (active) {
-          setData(d);
+          setDetail(d);
           setLoading(false);
         }
       })
@@ -52,27 +91,30 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
     };
-  }, [tick]);
+  }, [filters.de, filters.ate, tick]);
 
   const empByCid = useMemo(() => {
-    if (!data) return [];
+    if (!detail) return [];
     const arr: string[] = [];
-    for (const c of data.creatives) arr[c.id] = c.emp;
+    for (const c of detail.creatives) arr[c.id] = c.emp;
     return arr;
-  }, [data]);
+  }, [detail]);
 
   const value: DataState = useMemo(
     () => ({
-      rows: data?.rows ?? [],
-      creatives: data?.creatives ?? [],
-      range: data?.range ?? { min: "", max: "" },
-      updatedAt: data?.updatedAt ?? null,
+      rows: detail?.rows ?? [],
+      creatives: detail?.creatives ?? [],
+      summaryRows: summary?.summary ?? [],
+      range: detail?.range ?? summary?.range ?? { min: "", max: "" },
+      de: detail?.de ?? "",
+      ate: detail?.ate ?? "",
+      updatedAt: detail?.updatedAt ?? null,
       empByCid,
       loading,
       error,
       reload: () => setTick((t) => t + 1),
     }),
-    [data, empByCid, loading, error]
+    [detail, summary, empByCid, loading, error]
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
