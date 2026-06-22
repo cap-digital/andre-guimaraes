@@ -29,7 +29,6 @@ import {
 } from "@/lib/metrics";
 import {
   fmtBRL,
-  fmtBRLCompact,
   fmtCompact,
   fmtDec,
   fmtInt,
@@ -46,7 +45,6 @@ import { TendenciaChart } from "@/components/charts/TendenciaChart";
 import { MensalChart } from "@/components/charts/MensalChart";
 import { CustosChart } from "@/components/charts/CustosChart";
 import { RankBarChart, type RankItem } from "@/components/charts/RankBarChart";
-import { DonutChart } from "@/components/charts/DonutChart";
 import { Heatmap } from "@/components/charts/Heatmap";
 import { FunilConversao } from "@/components/charts/FunilConversao";
 import { ScatterCriativos } from "@/components/charts/ScatterCriativos";
@@ -109,7 +107,7 @@ export default function VisaoGeralPage() {
     const m = byDay(filteredRows);
     return [...m.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([d, a]) => ({ d, cpm: cpm(a), cpc: cpc(a), ctr: ctr(a) }));
+      .map(([d, a]) => ({ d, cpm: cpm(a), cpc: cpc(a), cpl: a.leads ? cpl(a) : 0 }));
   }, [filteredRows]);
 
   const mensal = useMemo(() => {
@@ -152,21 +150,6 @@ export default function VisaoGeralPage() {
         .slice(0, 7);
       return { titulo: "Criativos", items, fmt, unidade };
     }, [filteredRows, empByCid, creatives, emp, rankMetric]);
-
-  // Donut investimento por gênero
-  const donutGenero = useMemo(() => {
-    const m = groupBy(filteredRows, (r) => r.g);
-    const cores: Record<string, string> = {
-      female: "#9B6FD4",
-      male: "#175A97",
-      unknown: "#A9C8E8",
-    };
-    return GENEROS.map((g) => ({
-      nome: labelGenero(g),
-      value: m.get(g)?.spend ?? 0,
-      cor: cores[g],
-    })).filter((x) => x.value > 0);
-  }, [filteredRows]);
 
   // Heatmap de leads por faixa x gênero
   const heatmap = useMemo(() => {
@@ -304,32 +287,13 @@ export default function VisaoGeralPage() {
         />
       </div>
 
-      {/* Tendência + Gênero */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-        <ChartCard
-          className="lg:col-span-8"
-          title="Investimento e leads no período"
-          subtitle="Evolução diária de investimento (área) e leads (linha)"
-        >
-          <TendenciaChart data={tendencia} />
-        </ChartCard>
-        <ChartCard
-          className="lg:col-span-4"
-          title="Investimento por gênero"
-          subtitle="Distribuição do investimento"
-        >
-          {donutGenero.length ? (
-            <DonutChart
-              data={donutGenero}
-              fmt={(v) => fmtBRLCompact(v)}
-              centerLabel="Total"
-              centerValue={fmtBRLCompact(total.spend)}
-            />
-          ) : (
-            <EmptyState label="Sem dados" />
-          )}
-        </ChartCard>
-      </div>
+      {/* Tendência */}
+      <ChartCard
+        title="Investimento e leads no período"
+        subtitle="Evolução diária de investimento (área) e leads (linha)"
+      >
+        <TendenciaChart data={tendencia} />
+      </ChartCard>
 
       {/* Mensal + Custos */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
@@ -342,8 +306,8 @@ export default function VisaoGeralPage() {
         </ChartCard>
         <ChartCard
           className="lg:col-span-5"
-          title="Custos e taxa de cliques"
-          subtitle="CPM, CPC (R$) e CTR (%) ao longo do tempo"
+          title="Custo"
+          subtitle="CPM, CPC e CPL (R$) ao longo do tempo"
         >
           <CustosChart data={custos} />
         </ChartCard>
@@ -352,7 +316,7 @@ export default function VisaoGeralPage() {
       {/* Ranking + Funil */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
         <ChartCard
-          className="lg:col-span-7"
+          className="lg:col-span-8"
           title={`Ranking · ${rank.titulo}`}
           subtitle="Comparação por métrica selecionada"
           action={
@@ -382,7 +346,7 @@ export default function VisaoGeralPage() {
         </ChartCard>
 
         <ChartCard
-          className="lg:col-span-5"
+          className="lg:col-span-4"
           title="Funil de conversão"
           subtitle="Da impressão ao lead, com taxa de passagem"
         >

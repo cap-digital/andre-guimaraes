@@ -10,13 +10,13 @@ import {
   YAxis,
 } from "recharts";
 import { AXIS, GRID_COLOR, TooltipBox } from "./common";
-import { fmtBRL, fmtDataCurta, fmtPct } from "@/lib/format";
+import { fmtBRL, fmtDataCurta } from "@/lib/format";
 
 export interface CustoPonto {
   d: string;
   cpm: number;
   cpc: number;
-  ctr: number;
+  cpl: number;
 }
 
 export function CustosChart({ data }: { data: CustoPonto[] }) {
@@ -40,15 +40,6 @@ export function CustosChart({ data }: { data: CustoPonto[] }) {
           tickFormatter={(v) => fmtBRL(v, 0)}
           width={52}
         />
-        <YAxis
-          yAxisId="pct"
-          orientation="right"
-          tick={AXIS}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={(v) => `${v.toFixed(1)}%`}
-          width={44}
-        />
         <Tooltip
           content={({ active, payload, label }) =>
             active && payload?.length ? (
@@ -68,10 +59,10 @@ export function CustosChart({ data }: { data: CustoPonto[] }) {
                     fmt: (v) => fmtBRL(v),
                   },
                   {
-                    name: "CTR",
-                    value: payload.find((p) => p.dataKey === "ctr")?.value as number,
+                    name: "CPL",
+                    value: payload.find((p) => p.dataKey === "cpl")?.value as number,
                     color: "#10AFE0",
-                    fmt: (v) => fmtPct(v),
+                    fmt: (v) => fmtBRL(v),
                   },
                 ]}
               />
@@ -95,12 +86,11 @@ export function CustosChart({ data }: { data: CustoPonto[] }) {
           dot={false}
         />
         <Line
-          yAxisId="pct"
+          yAxisId="money"
           type="monotone"
-          dataKey="ctr"
+          dataKey="cpl"
           stroke="#10AFE0"
           strokeWidth={2}
-          strokeDasharray="4 3"
           dot={false}
         />
       </LineChart>

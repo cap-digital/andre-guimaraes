@@ -15,7 +15,7 @@ import {
 import { EMPREENDIMENTOS } from "@/lib/empreendimentos";
 import { ChartCard, Card } from "@/components/ui/Card";
 import { FullLoader, ErrorState, EmptyState } from "@/components/ui/States";
-import { MultiLineChart } from "@/components/charts/MultiLineChart";
+import { MultiBarChart } from "@/components/charts/MultiBarChart";
 import { DonutChart } from "@/components/charts/DonutChart";
 import { BarLineChart } from "@/components/charts/BarLineChart";
 
@@ -215,7 +215,7 @@ export default function EmpreendimentosPage() {
             </div>
           }
         >
-          <MultiLineChart
+          <MultiBarChart
             data={evolucao}
             series={series}
             xFormatter={fmtMesCurto}

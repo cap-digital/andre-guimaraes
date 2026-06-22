@@ -27,7 +27,7 @@ export function RankBarChart({
   fmt: (v: number) => string;
   unidade: string;
 }) {
-  const height = Math.max(data.length * 46 + 16, 180);
+  const height = Math.max(data.length * 54 + 16, 180);
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart
@@ -43,7 +43,8 @@ export function RankBarChart({
           tick={{ ...AXIS, fill: "#0D121A", fontSize: 12 }}
           axisLine={false}
           tickLine={false}
-          width={104}
+          width={180}
+          interval={0}
         />
         <Tooltip
           cursor={{ fill: "#F4F6FA" }}

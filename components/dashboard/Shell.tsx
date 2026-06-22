@@ -36,6 +36,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const { updatedAt, reload, loading } = useData();
   const qs = buildQuery(filters);
 
+  // A página de Empreendimentos sempre compara todos os empreendimentos
+  // (responde apenas ao filtro de período), então o seletor é ocultado.
+  const showEmpSwitcher = !pathname?.startsWith("/empreendimentos");
+
   return (
     <div className="min-h-screen lg:flex lg:h-screen lg:overflow-hidden">
       {/* Sidebar desktop */}
@@ -91,7 +95,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <EmpSwitcher />
+              {showEmpSwitcher && <EmpSwitcher />}
               <DateRangePicker />
               <button
                 onClick={reload}
