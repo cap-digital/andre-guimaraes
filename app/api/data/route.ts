@@ -11,13 +11,27 @@ import type {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// A Edge function quebra o período em janelas de 30 dias e busca em paralelo,
+// mas ainda pode levar bem mais de 60s. Plano Vercel Pro permite até 300s.
+export const maxDuration = 300;
 
 const EDGE_URL =
   "https://cqrpbiepyeypbkizwacu.supabase.co/functions/v1/Andre-Guimaraes";
 const EDGE_KEY = "sb_publishable_YN9YKLw6sludrgf9T2i_1g_Dcm8dIiK";
 
 const TTL_MS = 1000 * 60 * 30; // 30 minutos
+
+// A Edge responde 504 quando o gateway estoura (~150s). Abortamos um pouco
+// antes para conseguir tentar de novo dentro do mesmo request.
+const EDGE_TIMEOUT_MS = 135_000;
+const MAX_RETRIES = 2;
+
+// Início do dataset (Apps Script). Usado como `de` do "Todo o período" e para
+// montar o `range` que alimenta o seletor de datas no frontend.
+const DATASET_START = "2026-01-01";
+
+// Janela padrão quando nenhum período é selecionado.
+const DEFAULT_DAYS = 30;
 
 interface RawRow {
   date: string;
@@ -53,35 +67,88 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
-const emptyRange = { min: "", max: "" };
+// ---- Utilitários de data (YYYY-MM-DD em UTC) ----
 
-async function callEdge(body: Record<string, unknown>): Promise<EdgePayload> {
-  const res = await fetch(EDGE_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${EDGE_KEY}`,
-      apikey: EDGE_KEY,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
-  if (!res.ok) {
-    throw new Error(`Edge function respondeu ${res.status}`);
+function addDaysISO(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// O seletor de datas precisa dos limites do dataset inteiro. A Edge nem sempre
+// devolve `range`, então sintetizamos a partir do início conhecido até hoje.
+function datasetRange(payloadRange?: {
+  min: string;
+  max: string;
+}): { min: string; max: string } {
+  if (payloadRange?.min && payloadRange?.max) return payloadRange;
+  return { min: DATASET_START, max: todayISO() };
+}
+
+async function callEdge(
+  body: Record<string, unknown>,
+  attempt = 0
+): Promise<EdgePayload> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), EDGE_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(EDGE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${EDGE_KEY}`,
+        apikey: EDGE_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      // 5xx (inclui 504 de timeout) costuma ser transitório: tenta de novo.
+      if (res.status >= 500 && attempt < MAX_RETRIES) {
+        return callEdge(body, attempt + 1);
+      }
+      throw new Error(`Edge function respondeu ${res.status}`);
+    }
+
+    return (await res.json()) as EdgePayload;
+  } catch (err) {
+    const aborted = err instanceof Error && err.name === "AbortError";
+    const network = err instanceof TypeError;
+    if ((aborted || network) && attempt < MAX_RETRIES) {
+      return callEdge(body, attempt + 1);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
+}
 
-  return (await res.json()) as EdgePayload;
+// Resolve o período efetivo: usa o selecionado ou cai no padrão (últimos N dias).
+function resolvePeriod(
+  de?: string,
+  ate?: string
+): { de: string; ate: string } {
+  const effAte = ate || todayISO();
+  const effDe = de || addDaysISO(effAte, -(DEFAULT_DAYS - 1));
+  return { de: effDe, ate: effAte };
 }
 
 // ---- Detalhe: linhas por criativo × idade × gênero, do período selecionado ----
 
 async function buildDetail(de?: string, ate?: string): Promise<DatasetResponse> {
-  const body: Record<string, unknown> = { mode: "detail" };
-  if (de) body.de = de;
-  if (ate) body.ate = ate;
-
-  const json = await callEdge(body);
+  const period = resolvePeriod(de, ate);
+  const json = await callEdge({
+    mode: "detail",
+    de: period.de,
+    ate: period.ate,
+  });
   const raw = Array.isArray(json.meta) ? json.meta : [];
 
   const creativeIndex = new Map<string, number>();
@@ -128,36 +195,23 @@ async function buildDetail(de?: string, ate?: string): Promise<DatasetResponse> 
     });
   }
 
-  // O período efetivo é o que a Edge realmente aplicou (padrão = últimos 30 dias).
-  let effDe = de ?? "";
-  let effAte = ate ?? "";
-  if (!effDe || !effAte) {
-    let min = "9999-99-99";
-    let max = "0000-00-00";
-    for (const row of rows) {
-      if (row.d < min) min = row.d;
-      if (row.d > max) max = row.d;
-    }
-    if (rows.length) {
-      effDe = effDe || min;
-      effAte = effAte || max;
-    }
-  }
-
   return {
     rows,
     creatives,
-    range: json.range ?? emptyRange,
-    de: effDe,
-    ate: effAte,
+    range: datasetRange(json.range),
+    de: period.de,
+    ate: period.ate,
     updatedAt: new Date().toISOString(),
   };
 }
 
 // ---- Resumo: métricas diárias por empreendimento, todo o período ----
+// Alimenta o comparativo de período anterior e os gráficos mensais, por isso
+// pede o dataset inteiro (a Edge chunka internamente e devolve já agregado).
 
 async function buildSummary(): Promise<SummaryResponse> {
-  const json = await callEdge({ mode: "summary" });
+  const ate = todayISO();
+  const json = await callEdge({ mode: "summary", de: DATASET_START, ate });
   const raw = Array.isArray(json.meta) ? json.meta : [];
 
   const map = new Map<string, SummaryRow>();
@@ -190,7 +244,7 @@ async function buildSummary(): Promise<SummaryResponse> {
 
   return {
     summary: [...map.values()],
-    range: json.range ?? emptyRange,
+    range: datasetRange(json.range),
     updatedAt: new Date().toISOString(),
   };
 }
