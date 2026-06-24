@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Poppins } from "next/font/google";
+import { Suspense } from "react";
+import { DataProvider } from "@/components/DataProvider";
+import { FullLoader } from "@/components/ui/States";
 import "./globals.css";
 
 const poppins = Poppins({
@@ -23,7 +26,11 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body className={`${poppins.variable} font-sans antialiased`}>
-        {children}
+        {/* DataProvider único na raiz: landing e dashboard compartilham o mesmo
+            carregamento, tornando a navegação entre eles instantânea. */}
+        <Suspense fallback={<FullLoader />}>
+          <DataProvider>{children}</DataProvider>
+        </Suspense>
       </body>
     </html>
   );
